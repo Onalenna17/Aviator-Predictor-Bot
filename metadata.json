@@ -1,0 +1,6 @@
+{
+  "name": "Aviator Predictor Bot",
+  "description": "Live Betway Spribe Aviator crash game telemetry tracker, real-time multiplier monitor, and pink interval analyzer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
