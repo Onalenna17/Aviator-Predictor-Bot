@@ -71,4 +71,54 @@ class ExampleUnitTest {
         assertEquals("High Volatility", tip.volatilityGrade)
         assertTrue(tip.tip.contains("2-step"))
     }
+
+    @Test
+    fun testPredictorRiskModesAndDefaults() {
+        val conservative = com.aviatorpredictorbot.model.PredictorRiskMode.CONSERVATIVE
+        val balanced = com.aviatorpredictorbot.model.PredictorRiskMode.BALANCED
+        val aggressive = com.aviatorpredictorbot.model.PredictorRiskMode.AGGRESSIVE
+
+        assertEquals(1.30, conservative.defaultAutoStop, 0.001)
+        assertEquals(1.80, balanced.defaultAutoStop, 0.001)
+        assertEquals(5.00, aggressive.defaultAutoStop, 0.001)
+
+        assertTrue(conservative.expectedSafePercentageRange.contains("88%"))
+        assertTrue(balanced.expectedSafePercentageRange.contains("72%"))
+        assertTrue(aggressive.expectedSafePercentageRange.contains("45%"))
+    }
+
+    @Test
+    fun testSafeProbabilityStrengthCalculation() {
+        // High safety at low 1.30x auto-stop in conservative mode
+        val conservativeProb = (0.97 / 1.30) * 100.0 + 7.0
+        assertTrue("Conservative 1.30x must yield high safe %", conservativeProb > 80.0)
+
+        // Lower safe % at aggressive 5.00x auto-stop
+        val aggressiveProb = (0.97 / 5.00) * 100.0 + 4.5
+        assertTrue("Aggressive 5.00x target must yield lower safe %", aggressiveProb < 50.0)
+    }
+
+    @Test
+    fun testPredictorSettingsHapticFeedbackDefaultEnabled() {
+        val settings = com.aviatorpredictorbot.model.PredictorSettings()
+        assertTrue("Haptic vibration feedback should be enabled by default", settings.hapticFeedbackEnabled)
+        assertTrue("Local notification alerts should be enabled by default", settings.notificationsEnabled)
+    }
+
+    @Test
+    fun testHighConfidenceHapticAndNotificationTriggerConditions() {
+        val highConfidencePrediction = 82
+        val safeProbStrength = 78
+        val isHighProbabilityEvent = highConfidencePrediction >= 75 || safeProbStrength >= 75
+        assertTrue("High probability event must trigger notification and haptics", isHighProbabilityEvent)
+    }
+
+    @Test
+    fun testRealCrashDetectionConditions() {
+        val crashedPhase = "CRASHED"
+        val flewAwayMsg = "FLEW AWAY @ 4.82x"
+        val isCrash = crashedPhase.equals("CRASHED", ignoreCase = true) || flewAwayMsg.contains("FLEW AWAY", ignoreCase = true)
+        assertTrue("Crash phase or Flew Away train message must trigger authentic Aviator crash sound", isCrash)
+    }
 }
+

@@ -11,6 +11,8 @@ import com.aviatorpredictorbot.model.LongTermStats
 import com.aviatorpredictorbot.model.MultiplierRecord
 import com.aviatorpredictorbot.model.PredictedNextRound
 import com.aviatorpredictorbot.model.PredictionInsight
+import com.aviatorpredictorbot.model.PredictorRiskMode
+import com.aviatorpredictorbot.model.SafeProbabilityStrength
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -205,10 +207,60 @@ class AviatorRepository(
         }
     }
 
+    fun computeSafeProbabilityStrength(
+        history: List<Double>,
+        riskMode: PredictorRiskMode = PredictorRiskMode.BALANCED,
+        autoStopMultiplier: Double = 1.80
+    ): SafeProbabilityStrength {
+        val target = autoStopMultiplier.coerceAtLeast(1.05)
+        // Spribe Provably Fair RTP formula: probability = 0.97 / multiplier
+        val theoreticalProb = (0.97 / target) * 100.0
+
+        val recent10 = history.takeLast(10)
+        val lowCount = recent10.count { it < 2.0 }
+
+        // Volatility weight based on recent crash clusters
+        val coldReboundModifier = when {
+            lowCount >= 7 -> 5.5
+            lowCount >= 4 -> 3.0
+            lowCount <= 1 -> -3.5
+            else -> 0.0
+        }
+
+        val riskOffset = when (riskMode) {
+            PredictorRiskMode.CONSERVATIVE -> if (target <= 1.45) 7.0 else -4.0
+            PredictorRiskMode.BALANCED -> 0.0
+            PredictorRiskMode.AGGRESSIVE -> if (target >= 3.5) 4.5 else -2.5
+        }
+
+        val finalProb = (theoreticalProb + coldReboundModifier + riskOffset).coerceIn(12.0, 96.0).toInt()
+
+        val (grade, colorHex, rating, rec) = when {
+            finalProb >= 82 -> Tuple4("VERY HIGH", 0xFF1E9E5A, "SAFE ZONE · HIGH STRENGTH", "Optimal auto-cashout target with high probability statistical clearance.")
+            finalProb >= 70 -> Tuple4("HIGH", 0xFF2B70E0, "OPTIMAL HARMONIC ZONE", "Solid probability strength matching Spribe purple recovery curve.")
+            finalProb >= 52 -> Tuple4("MODERATE", 0xFFFFA000, "MEDIUM RISK · VOLATILE", "Moderate variance zone; protect your bankroll with smaller bets.")
+            else -> Tuple4("SPECULATIVE", 0xFFF00838, "HIGH RISK · SPECULATIVE", "Target exceeds safe median crash line; expect higher rate of early crash.")
+        }
+
+        val summary = "Theoretical RTP ${(0.97 / target * 100.0).toInt()}% · Volatility Weight: ${if (coldReboundModifier >= 0) "+$coldReboundModifier" else "$coldReboundModifier"}%"
+
+        return SafeProbabilityStrength(
+            percentage = finalProb,
+            grade = grade,
+            statusColorHex = colorHex,
+            targetMultiplier = target,
+            riskRating = rating,
+            formulaSummary = summary,
+            recommendation = rec
+        )
+    }
+
     fun computePredictedNextRound(
         history: List<Double>,
         currentRoundId: String,
-        nextTimeStr: String?
+        nextTimeStr: String?,
+        riskMode: PredictorRiskMode = PredictorRiskMode.BALANCED,
+        autoStopMultiplier: Double = 1.80
     ): PredictedNextRound {
         val nextId = if (currentRoundId.startsWith("#")) {
             val num = currentRoundId.removePrefix("#").toLongOrNull()
@@ -218,16 +270,26 @@ class AviatorRepository(
         }
 
         val nextTime = nextTimeStr ?: timeFormat.format(Date(System.currentTimeMillis() + 4000))
+        val safeProb = computeSafeProbabilityStrength(history, riskMode, autoStopMultiplier)
 
         if (history.isEmpty()) {
             return PredictedNextRound(
-                predictedMultiplier = 2.15,
-                safeCashoutTarget = "1.45x",
-                targetZone = "Moderate Purple (2x-3x)",
-                confidencePercentage = 78,
+                predictedMultiplier = when (riskMode) {
+                    PredictorRiskMode.CONSERVATIVE -> 1.35
+                    PredictorRiskMode.BALANCED -> 2.15
+                    PredictorRiskMode.AGGRESSIVE -> 6.50
+                },
+                safeCashoutTarget = String.format(Locale.US, "%.2fx", autoStopMultiplier),
+                targetZone = when (riskMode) {
+                    PredictorRiskMode.CONSERVATIVE -> "Capital Protection Zone"
+                    PredictorRiskMode.BALANCED -> "Moderate Purple (2x-3x)"
+                    PredictorRiskMode.AGGRESSIVE -> "Pink Surge Target"
+                },
+                confidencePercentage = safeProb.percentage,
                 nextRoundId = nextId,
                 nextRoundTime = nextTime,
-                trendReasoning = "Statistical baseline for upcoming Betway Spribe round."
+                trendReasoning = "Statistical baseline for upcoming Betway Spribe round.",
+                safeProbabilityStrength = safeProb
             )
         }
 
@@ -238,44 +300,79 @@ class AviatorRepository(
         val lowCount = recent5.count { it < 2.0 }
         val lastMult = history.lastOrNull() ?: 1.50
 
-        val (predMult, zone, safe, conf, reason) = when {
-            roundsSinceLastPink in 11..16 -> {
-                val target = String.format(Locale.US, "%.2f", 12.50 + (roundsSinceLastPink % 4) * 2.8).toDouble()
+        val (predMult, zone, safe, conf, reason) = when (riskMode) {
+            PredictorRiskMode.CONSERVATIVE -> {
+                val target = autoStopMultiplier.coerceIn(1.15, 1.50)
                 Tuple5(
                     target,
-                    "★ PINK BURST ZONE (10x+) ★",
-                    "1.85x",
-                    89,
-                    "Spribe 10x+ harmonic threshold active (${roundsSinceLastPink} rounds since last pink)."
+                    "Conservative Safety Zone (Low Risk)",
+                    String.format(Locale.US, "%.2fx", target),
+                    safeProb.percentage,
+                    "Low risk mode active. Auto-cashout prioritized to protect principal capital."
                 )
             }
-            lowCount >= 4 -> {
-                Tuple5(
-                    2.84,
-                    "Purple Rebound Zone",
-                    "1.38x",
-                    82,
-                    "Cluster of 4 sub-2x crashes detected; high probability of purple 2x-3x rebound."
-                )
+            PredictorRiskMode.AGGRESSIVE -> {
+                if (roundsSinceLastPink in 9..18) {
+                    val target = String.format(Locale.US, "%.2f", 11.20 + (roundsSinceLastPink % 5) * 3.1).toDouble()
+                    Tuple5(
+                        target,
+                        "★ AGGRESSIVE PINK BURST (10x+) ★",
+                        String.format(Locale.US, "%.2fx", autoStopMultiplier),
+                        safeProb.percentage,
+                        "Pink surge window active (${roundsSinceLastPink} rounds since last 10x+)."
+                    )
+                } else {
+                    val target = String.format(Locale.US, "%.2f", (autoStopMultiplier * 1.5).coerceAtLeast(5.0)).toDouble()
+                    Tuple5(
+                        target,
+                        "High Multiplier Surge (5x+)",
+                        String.format(Locale.US, "%.2fx", autoStopMultiplier),
+                        safeProb.percentage,
+                        "Aggressive mode: hunting high purple/pink harmonic breakout."
+                    )
+                }
             }
-            lastMult >= 10.0 -> {
-                Tuple5(
-                    1.42,
-                    "Sub-2x Conservative Zone",
-                    "1.22x",
-                    86,
-                    "Immediate post-pink cooldown round. Prioritize conservative cashout under 1.45x."
-                )
-            }
-            else -> {
-                val harmonic = String.format(Locale.US, "%.2f", 1.85 + ((history.size % 7) * 0.35)).toDouble()
-                Tuple5(
-                    harmonic,
-                    "Standard Flight Zone",
-                    "1.48x",
-                    77,
-                    "Balanced Spribe distribution curve detected."
-                )
+            PredictorRiskMode.BALANCED -> {
+                when {
+                    roundsSinceLastPink in 11..16 -> {
+                        val target = String.format(Locale.US, "%.2f", 12.50 + (roundsSinceLastPink % 4) * 2.8).toDouble()
+                        Tuple5(
+                            target,
+                            "★ PINK BURST ZONE (10x+) ★",
+                            String.format(Locale.US, "%.2fx", autoStopMultiplier),
+                            safeProb.percentage,
+                            "Spribe 10x+ harmonic threshold active (${roundsSinceLastPink} rounds since last pink)."
+                        )
+                    }
+                    lowCount >= 4 -> {
+                        Tuple5(
+                            2.84,
+                            "Purple Rebound Zone",
+                            String.format(Locale.US, "%.2fx", autoStopMultiplier),
+                            safeProb.percentage,
+                            "Cluster of 4 sub-2x crashes detected; high probability of purple 2x-3x rebound."
+                        )
+                    }
+                    lastMult >= 10.0 -> {
+                        Tuple5(
+                            1.42,
+                            "Sub-2x Cooldown Zone",
+                            String.format(Locale.US, "%.2fx", autoStopMultiplier.coerceAtMost(1.35)),
+                            safeProb.percentage,
+                            "Immediate post-pink cooldown round. Prioritize conservative cashout."
+                        )
+                    }
+                    else -> {
+                        val harmonic = String.format(Locale.US, "%.2f", 1.85 + ((history.size % 7) * 0.35)).toDouble()
+                        Tuple5(
+                            harmonic,
+                            "Standard Flight Zone",
+                            String.format(Locale.US, "%.2fx", autoStopMultiplier),
+                            safeProb.percentage,
+                            "Balanced Spribe distribution curve detected."
+                        )
+                    }
+                }
             }
         }
 
@@ -286,7 +383,8 @@ class AviatorRepository(
             confidencePercentage = conf,
             nextRoundId = nextId,
             nextRoundTime = nextTime,
-            trendReasoning = reason
+            trendReasoning = reason,
+            safeProbabilityStrength = safeProb
         )
     }
 
@@ -354,8 +452,14 @@ class AviatorRepository(
         )
     }
 
-    fun computePrediction(history: List<Double>): PredictionInsight {
+    fun computePrediction(
+        history: List<Double>,
+        riskMode: PredictorRiskMode = PredictorRiskMode.BALANCED,
+        autoStopMultiplier: Double = 1.80
+    ): PredictionInsight {
         val nowStr = timeFormat.format(Date())
+        val safeProb = computeSafeProbabilityStrength(history, riskMode, autoStopMultiplier)
+
         if (history.isEmpty()) {
             return PredictionInsight(
                 safeCashoutRange = "1.25x - 1.55x",
@@ -365,7 +469,8 @@ class AviatorRepository(
                 currentTrend = "Awaiting Live Rounds",
                 adviceMessage = "Connecting to live Betway Aviator Spribe feed...",
                 timestamp = nowStr,
-                provablyFairHash = "SHA512-Verified"
+                provablyFairHash = "SHA512-Verified",
+                safeProbabilityStrength = safeProb
             )
         }
 
@@ -389,13 +494,29 @@ class AviatorRepository(
             else -> "Cooldown Phase (22%)"
         }
 
-        val safe = if (lowCount >= 3) "1.20x - 1.45x" else "1.35x - 1.70x"
-        val moderate = if (lowCount >= 3) "1.75x - 2.30x" else "2.10x - 3.50x"
+        val safe = when (riskMode) {
+            PredictorRiskMode.CONSERVATIVE -> "1.18x - ${String.format(Locale.US, "%.2f", autoStopMultiplier.coerceAtMost(1.45))}x"
+            PredictorRiskMode.BALANCED -> if (lowCount >= 3) "1.20x - 1.45x" else "1.35x - ${String.format(Locale.US, "%.2f", autoStopMultiplier)}x"
+            PredictorRiskMode.AGGRESSIVE -> "1.45x - ${String.format(Locale.US, "%.2f", autoStopMultiplier)}x"
+        }
+
+        val moderate = when (riskMode) {
+            PredictorRiskMode.CONSERVATIVE -> "1.45x - 1.85x"
+            PredictorRiskMode.BALANCED -> if (lowCount >= 3) "1.75x - 2.30x" else "2.10x - 3.50x"
+            PredictorRiskMode.AGGRESSIVE -> "3.50x - 12.00x"
+        }
 
         val advice = when {
-            lowCount >= 4 -> "Heavy cluster of crashes under 2.0x detected in Betway Aviator. High risk zone; prioritize conservative auto-cashouts."
-            roundsSinceLastPink in 9..15 -> "Statistical threshold for Spribe 10x+ pink multiplier is active based on historical spacing."
-            else -> "Standard distribution detected. Remember Spribe Provably Fair SHA512 rounds remain independent."
+            riskMode == PredictorRiskMode.CONSERVATIVE ->
+                "Conservative risk mode: prioritize small compounding gains at $safe. Auto-stop strictly set at ${String.format(Locale.US, "%.2f", autoStopMultiplier)}x."
+            riskMode == PredictorRiskMode.AGGRESSIVE ->
+                "Aggressive pink hunter mode active. High payout targets prioritized; ensure bankroll withstands sub-2.0x drawdowns."
+            lowCount >= 4 ->
+                "Heavy cluster of crashes under 2.0x detected in Betway Aviator. High risk zone; prioritize conservative auto-cashouts."
+            roundsSinceLastPink in 9..15 ->
+                "Statistical threshold for Spribe 10x+ pink multiplier is active based on historical spacing."
+            else ->
+                "Standard distribution detected. Remember Spribe Provably Fair SHA512 rounds remain independent."
         }
 
         return PredictionInsight(
@@ -406,7 +527,8 @@ class AviatorRepository(
             currentTrend = trend,
             adviceMessage = advice,
             timestamp = nowStr,
-            provablyFairHash = "SHA512: " + (0..7).map { "0123456789abcdef".random() }.joinToString("")
+            provablyFairHash = "SHA512: " + (0..7).map { "0123456789abcdef".random() }.joinToString(""),
+            safeProbabilityStrength = safeProb
         )
     }
 
@@ -431,6 +553,10 @@ class AviatorRepository(
         cal.add(Calendar.MINUTE, minutes)
         return cal.time
     }
+
+    private data class Tuple4<A, B, C, D>(
+        val a: A, val b: B, val c: C, val d: D
+    )
 
     private data class Tuple5<A, B, C, D, E>(
         val a: A, val b: B, val c: C, val d: D, val e: E

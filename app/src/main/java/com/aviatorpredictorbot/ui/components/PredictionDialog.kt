@@ -78,6 +78,49 @@ fun PredictionDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Prediction Probability Strength Badge
+                val prob = insight.safeProbabilityStrength
+                val probColor = Color(prob.statusColorHex)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(probColor.copy(alpha = 0.12f))
+                        .border(1.dp, probColor.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "PREDICTION PROBABILITY STRENGTH",
+                                color = probColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.3.sp
+                            )
+                            Text(
+                                text = "${prob.grade} · ${prob.riskRating}",
+                                color = InkDark,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Text(
+                            text = "${prob.percentage}% SAFE",
+                            color = probColor,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 PredictionTierCard(
                     title = "SAFE CASHOUT TARGET (BLUE/PURPLE)",
                     multiplierRange = insight.safeCashoutRange,

@@ -1,5 +1,64 @@
 package com.aviatorpredictorbot.model
 
+enum class PredictorRiskMode(
+    val title: String,
+    val shortLabel: String,
+    val subtitle: String,
+    val baseTargetMultiplier: Double,
+    val defaultAutoStop: Double,
+    val expectedSafePercentageRange: String
+) {
+    CONSERVATIVE(
+        title = "Conservative (Low Risk)",
+        shortLabel = "LOW RISK",
+        subtitle = "Capital preservation · High win probability (88%-96%) at sub-1.40x auto-stop",
+        baseTargetMultiplier = 1.35,
+        defaultAutoStop = 1.30,
+        expectedSafePercentageRange = "88% - 96%"
+    ),
+    BALANCED(
+        title = "Balanced (Standard)",
+        shortLabel = "BALANCED",
+        subtitle = "Optimal risk/reward · 72%-85% probability capturing 1.80x-2.80x purple cycles",
+        baseTargetMultiplier = 2.15,
+        defaultAutoStop = 1.80,
+        expectedSafePercentageRange = "72% - 85%"
+    ),
+    AGGRESSIVE(
+        title = "Aggressive (Pink Hunter)",
+        shortLabel = "HIGH RISK",
+        subtitle = "High volatility · Pink 10x+ harmonic surge timing with larger drawdown tolerance",
+        baseTargetMultiplier = 10.50,
+        defaultAutoStop = 5.00,
+        expectedSafePercentageRange = "45% - 68%"
+    )
+}
+
+data class SafeProbabilityStrength(
+    val percentage: Int = 85,
+    val grade: String = "STRONG",
+    val statusColorHex: Long = 0xFF1E9E5A,
+    val targetMultiplier: Double = 1.45,
+    val riskRating: String = "LOW RISK",
+    val formulaSummary: String = "Spribe 97% RTP curve + Cold streak rebound coefficient",
+    val recommendation: String = "Auto-cashout aligned with low volatility zone."
+)
+
+data class PredictorSettings(
+    val riskMode: PredictorRiskMode = PredictorRiskMode.BALANCED,
+    val autoStopMultiplier: Double = 1.80,
+    val pinkAlertThreshold: Double = 10.0,
+    val streakProtectionThreshold: Int = 3,
+    val soundMasterEnabled: Boolean = true,
+    val soundEngineEnabled: Boolean = true,
+    val soundCrashEnabled: Boolean = true,
+    val soundCashoutEnabled: Boolean = true,
+    val soundPinkSirenEnabled: Boolean = true,
+    val soundVolume: Float = 0.85f,
+    val hapticFeedbackEnabled: Boolean = true,
+    val notificationsEnabled: Boolean = true
+)
+
 data class MultiplierRecord(
     val id: String,
     val multiplier: Double,
@@ -40,7 +99,8 @@ data class PredictedNextRound(
     val confidencePercentage: Int,
     val nextRoundId: String,
     val nextRoundTime: String,
-    val trendReasoning: String
+    val trendReasoning: String,
+    val safeProbabilityStrength: SafeProbabilityStrength = SafeProbabilityStrength()
 )
 
 data class AviatorFeedResponse(
@@ -104,5 +164,6 @@ data class PredictionInsight(
     val currentTrend: String,
     val adviceMessage: String,
     val timestamp: String,
-    val provablyFairHash: String = ""
+    val provablyFairHash: String = "",
+    val safeProbabilityStrength: SafeProbabilityStrength = SafeProbabilityStrength()
 )
